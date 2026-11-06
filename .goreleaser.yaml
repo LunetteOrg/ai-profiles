@@ -1,0 +1,42 @@
+version: 2
+
+project_name: ai-profile
+
+before:
+  hooks:
+    - go mod tidy
+    - go vet ./...
+    - go test ./...
+
+builds:
+  - id: ai-profile
+    main: ./cmd/ai-profile
+    binary: ai-profile
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+  - id: ai-secrets
+    main: ./cmd/ai-secrets
+    binary: ai-secrets
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
