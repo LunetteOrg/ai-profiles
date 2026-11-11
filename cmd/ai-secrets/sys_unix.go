@@ -20,6 +20,14 @@ func execCommand(args []string, env []string) error {
 	return syscall.Exec(bin, args, env)
 }
 
+// shimSupported: a tool shim replaces itself with the real tool.
+const shimSupported = true
+
+// execPath replaces ai-secrets with bin, argv[0] included in argv.
+func execPath(bin string, argv, env []string) error {
+	return syscall.Exec(bin, argv, env)
+}
+
 // notify shows a macOS notification before a password manager asks.
 func notify(msg string) {
 	if runtime.GOOS != "darwin" {

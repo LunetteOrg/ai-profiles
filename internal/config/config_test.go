@@ -416,3 +416,65 @@ func TestLoadRejectsBadSecrets(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadTools(t *testing.T) {
+	home := t.TempDir()
+	cfg, err := Load(writeConfig(t, `default = "p"
+[profiles.p]
+[profiles.client-a]
+[profiles.client-a.tools.scw]
+env.SCW_SECRET_KEY = "op://Client-a/Scaleway/secret key"
+reason = "Scaleway CLI"
+`), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := cfg.Profiles["client-a"].Tools["scw"]
+	if tool == nil || tool.Reason != "Scaleway CLI" || tool.Env["SCW_SECRET_KEY"] != "op://Client-a/Scaleway/secret key" {
+		t.Errorf("tools.scw read as %+v", tool)
+	}
+	if len(cfg.Profiles["p"].Tools) != 0 {
+		t.Errorf("a profile without tools has %v", cfg.Profiles["p"].Tools)
+	}
+}
+
+func TestLoadRejectsBadTools(t *testing.T) {
+	cases := map[string]string{
+		"valore in chiaro":     "default = \"p\"\n[profiles.p.tools.scw]\nenv.SCW_SECRET_KEY = \"abc\"\n",
+		"riferimento env:":     "default = \"p\"\n[profiles.p.tools.scw]\nenv.SCW_SECRET_KEY = \"env:X\"\n",
+		"nome non valido":      "default = \"p\"\n[profiles.p.tools.scw]\nenv.\"1-K\" = \"op://a/b/c\"\n",
+		"bw:// senza account":  "default = \"p\"\n[profiles.p.tools.scw]\nenv.K = \"bw://x\"\n",
+		"nome con cartella":    "default = \"p\"\n[profiles.p.tools.\"a/scw\"]\nenv.K = \"op://a/b/c\"\n",
+		"nome di un agente":    "default = \"p\"\n[profiles.p.tools.claude]\nenv.K = \"op://a/b/c\"\n",
+		"nome di ai-secrets":   "default = \"p\"\n[profiles.p.tools.ai-secrets]\nenv.K = \"op://a/b/c\"\n",
+		"tool senza variabili": "default = \"p\"\n[profiles.p.tools.scw]\nreason = \"x\"\n",
+	}
+	for name, body := range cases {
+		if _, err := Load(writeConfig(t, body), t.TempDir()); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+}
+
+func TestLoadToolDenyArgs(t *testing.T) {
+	cfg, err := Load(writeConfig(t, `default = "p"
+[profiles.p.tools.scw]
+env.SCW_SECRET_KEY = "op://a/b/c"
+deny_args = [["config", "info"], ["config", "get", "secret-key"]]
+`), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := cfg.Profiles["p"].Tools["scw"].DenyArgs; len(d) != 2 || strings.Join(d[1], " ") != "config get secret-key" {
+		t.Errorf("deny_args read as %v", d)
+	}
+	for name, body := range map[string]string{
+		"prefisso vuoto":     "default = \"p\"\n[profiles.p.tools.scw]\nenv.K = \"op://a/b/c\"\ndeny_args = [[]]\n",
+		"argomento vuoto":    "default = \"p\"\n[profiles.p.tools.scw]\nenv.K = \"op://a/b/c\"\ndeny_args = [[\"config\", \"\"]]\n",
+		"argomento con flag": "default = \"p\"\n[profiles.p.tools.scw]\nenv.K = \"op://a/b/c\"\ndeny_args = [[\"-p\", \"x\"]]\n",
+	} {
+		if _, err := Load(writeConfig(t, body), t.TempDir()); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+}

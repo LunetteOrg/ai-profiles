@@ -39,6 +39,16 @@ export PATH="$HOME/.local/share/ai-profiles/shims:$PATH"   # in the shell startu
 `ai-profile doctor` says when a startup file puts an agent's folder before the
 shims.
 
+The tool shims are links named after the CLIs declared in `tools.` (below,
+Secrets), pointing to `ai-secrets`, in a folder of their own that also comes
+before the real tools in `PATH`:
+
+```sh
+mkdir -p ~/.local/share/ai-profiles/tool-shims
+for t in scw; do ln -s "$(command -v ai-secrets)" ~/.local/share/ai-profiles/tool-shims/$t; done
+export PATH="$HOME/.local/share/ai-profiles/tool-shims:$PATH"   # in the shell startup file
+```
+
 ## Commands
 
 | Command | What it does |
@@ -238,6 +248,31 @@ at launch, so they apply to launches through `ai-profile` or a shim:
 secrets.MOONSHOT_API_KEY = "op://Client-a/Kimi/credential"
 secrets.MISTRAL_API_KEY = "bw://Mistral"
 ```
+
+**Tool keys** are for CLIs that read a key from the environment before their
+own config file, such as the Scaleway CLI (`SCW_SECRET_KEY` before
+`~/.config/scw/config.yaml`). Called through its tool shim, the CLI gets the
+key from `ai-secrets` in its own environment only: the key is neither in the
+file nor in the agent's environment.
+
+```toml
+[profiles.client-a.tools.scw]
+env.SCW_SECRET_KEY = "op://Client-a/Scaleway/secret key"
+reason = "Scaleway CLI"
+deny_args = [["config", "info"], ["config", "dump"], ["config", "get", "secret-key"], ["config", "get", "secret_key"]]
+```
+
+`deny_args` lists the subcommands the shim refuses to run: `scw config info`,
+`dump` and `get secret-key` print the active configuration, environment
+included, so they would print the key. A subcommand matches after the global
+flags (`scw -p prod config info` is refused); a refused command exits with an
+error and neither asks for the key nor runs `scw`.
+
+The shim finds the folder's profile as `ai-profile` does. When that profile
+declares the tool, it resolves the `env.` references as `ai-secrets run` does,
+with the same approval and `ttl`, `reason` (default: the tool's name) and the
+profile as the reason, then execs the next tool of that name in `PATH`, outside
+its own folder. Otherwise it execs the tool unchanged.
 
 **ai-secrets** answers on a socket in `~/.cache/ai-secrets/`, a folder only the
 user can enter, and starts by itself on the first request:
@@ -495,6 +530,7 @@ repairs what can be repaired safely and keeps a copy of what it changes.
 | Secrets | A reference that does not resolve; `ai-secrets`, `op` or `bw` missing from `PATH`; a Bitwarden account not logged in; a missing `env:` variable. |
 | MCP | Pending `sync` changes; servers in `~/.claude.json`, visible to sessions without a profile; a credential folder with files `only` does not allow. |
 | Folders | A `[[folders]]` entry with one profile or a missing folder; a `mise.toml`, `mise.local.toml` or `.envrc` that sets an agent's folder. |
+| Tools | A tool shim missing, behind the real tool, or with no real tool after it in `PATH`; a tool's config file that still holds the secret (for `scw`, a `secret_key` in any profile of its `config.yaml`, named without the value). |
 | `PATH` | A shim that does not come before the real agent, including lines of the zsh startup files and of the bash login file that put an agent's folder first. |
 | Desktop | A copy open without its data folder, behind Claude.app, without its icon or with leftovers of a swap; a launcher missing or not written by `ai-profile`. |
 | Claudian | A vault whose Claudian does not pass the vault's profile in `CLAUDE_CONFIG_DIR`. |
@@ -513,6 +549,7 @@ The account is read from what each app records: `oauthAccount` in the profile's
 | Codex and OpenCode login | files and database in the profile folder | as macOS | as macOS |
 | Shared parts | symlinks | symlinks | junctions for folders, hardlinks or copies for files |
 | Shims | links in `PATH` | links in `PATH` | `.cmd` in `PATH` |
+| Tool shims | links in `PATH` | links in `PATH` | not available (`doctor` reports it) |
 | Claude Desktop instances, `account` | yes | no | no |
 
 ## Orca
@@ -536,6 +573,11 @@ shims choose the profile in its terminals as anywhere else.
 
 ## Discarded directions
 
+- **Tool keys in a profile's `secrets.`**: the key would be in the whole
+  environment of the agent, which can print it.
+- **Tool shims in the agents' shim folder**: the tool shims are links to
+  `ai-secrets`, the agent shims to `ai-profile`; a folder each keeps the
+  installation and the `PATH` order of the two apart.
 - **Personal profile in `~/.claude`**: a session opened in a folder no profile
   declares would use the personal account; with the personal profile in its own
   folder, `~/.claude` has no login.

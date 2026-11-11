@@ -6,6 +6,10 @@
 //
 // replaces the op:// references in the environment with their values, asking
 // the agent (started on demand), then runs the command.
+//
+// A link named after a tool (scw → ai-secrets) is a tool shim: it runs the
+// next tool of that name in PATH with the secrets of the folder's profile
+// ([profiles.<p>.tools.<name>]) in that process's environment only.
 package main
 
 import (
@@ -13,13 +17,17 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
 
+	"github.com/LunetteOrg/ai-profiles/internal/config"
+	"github.com/LunetteOrg/ai-profiles/internal/lastused"
 	"github.com/LunetteOrg/ai-profiles/internal/private"
 	"github.com/LunetteOrg/ai-profiles/internal/secretagent"
 	"github.com/LunetteOrg/ai-profiles/internal/secrets"
+	"github.com/LunetteOrg/ai-profiles/internal/toolshim"
 )
 
 const helpText = `ai-secrets: 1Password and Bitwarden secrets kept in memory for a while.
@@ -37,14 +45,74 @@ const helpText = `ai-secrets: 1Password and Bitwarden secrets kept in memory for
                        brings them back with the [private] restore command;
                        files that differ stay as they are without --force
 
+A link named after a tool (scw → ai-secrets) is a tool shim: it runs the next
+tool of that name in PATH with the env. references of [profiles.<p>.tools.<name>]
+of the folder's profile resolved, or unchanged when the profile has none.
+
 Validity (ttl) and how to reach each store: %s (default ttl %s).
 `
 
 func main() {
+	run := run
+	// Called by another name, ai-secrets is a tool shim: every argument
+	// belongs to the tool.
+	if name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe"); name != "ai-secrets" {
+		run = func(args []string) error { return runShim(name, args) }
+	}
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "ai-secrets:", err)
 		os.Exit(1)
 	}
+}
+
+// runShim runs the real tool name with the secrets of its section in the
+// folder's profile, or unchanged when the profile does not declare it.
+func runShim(name string, args []string) error {
+	if !shimSupported {
+		return fmt.Errorf("%s: tool shims are not available on Windows yet; remove the shim and use ai-secrets run", name)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	pathList := os.Getenv("PATH")
+	real, err := toolshim.FindReal(name, pathList, toolshim.ShimDir(os.Args[0], pathList), self)
+	if err != nil {
+		return err
+	}
+	var cfg *config.Config
+	if cfgPath := config.DefaultPath(home, os.Getenv); config.Exists(cfgPath) {
+		if cfg, err = config.Load(cfgPath, home); err != nil {
+			var missing *private.MissingError
+			if errors.As(err, &missing) {
+				return fmt.Errorf("%w: ai-profile restore brings it back", err)
+			}
+			return err
+		}
+		cfg.LastUsed = func(dir string) string { return lastused.Get(home, dir) }
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	s := &toolshim.Shim{
+		Name: name, Real: real, Dir: cwd, Cfg: cfg, Environ: os.Environ(),
+		Get: func(reason string, refs map[string]string, account string) (map[string]string, error) {
+			c, err := client(secretagent.PathsFor(home))
+			if err != nil {
+				return nil, err
+			}
+			return c.Get(reason, refs, account)
+		},
+		Exec: func(bin string, args, env []string) error {
+			return execPath(bin, append([]string{name}, args...), env)
+		},
+	}
+	return s.Run(args)
 }
 
 func client(p secretagent.Paths) (*secretagent.Client, error) {

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"github.com/LunetteOrg/ai-profiles/internal/private"
 	"github.com/LunetteOrg/ai-profiles/internal/secrets"
 	"github.com/LunetteOrg/ai-profiles/internal/skills"
+	"github.com/LunetteOrg/ai-profiles/internal/toolshim"
 )
 
 type Status int
@@ -336,6 +338,12 @@ func Run(e Env) []Result {
 	for _, name := range e.Cfg.Names() {
 		p := e.Cfg.Profiles[name]
 		refs := e.Cfg.SecretsFor(p)
+		// Tool shims resolve their references through ai-secrets too.
+		for tool, t := range p.Tools {
+			for k, v := range t.Env {
+				refs["tool "+tool+" "+k] = v
+			}
+		}
 		// MCP servers with op:// references start inside op run.
 		for _, srv := range profileServers(p) {
 			for _, v := range e.Cfg.MCP[srv].Env {
@@ -458,7 +466,79 @@ func Run(e Env) []Result {
 		}
 	}
 	res = append(res, startupPathChecks(e.Home, e.Self, usedAgents, stamp, tilde)...)
+	res = append(res, toolChecks(e, getenv, tilde)...)
 	return res
+}
+
+// toolChecks checks the tools declared in the profiles: the tool shim comes
+// first in PATH with the real tool after it, and the tool's own config file
+// no longer holds the secret.
+func toolChecks(e Env, getenv func(string) string, tilde func(string) string) []Result {
+	var res []Result
+	add := func(s Status, format string, args ...any) {
+		res = append(res, Result{Area: "Tools", Status: s, Msg: fmt.Sprintf(format, args...)})
+	}
+	declared := map[string][]string{}
+	for _, name := range e.Cfg.Names() {
+		for tool := range e.Cfg.Profiles[name].Tools {
+			declared[tool] = append(declared[tool], name)
+		}
+	}
+	for _, tool := range slices.Sorted(maps.Keys(declared)) {
+		profiles := strings.Join(declared[tool], ", ")
+		if runtime.GOOS == "windows" {
+			add(Warn, "%s (tools of %s): tool shims are not available on Windows, the secret is not resolved", tool, profiles)
+		} else {
+			res = append(res, toolPathCheck(tool, profiles, e.PathList, tilde))
+		}
+		if check := toolConfigChecks[tool]; check != nil {
+			file, holders, err := check(e.Home, getenv)
+			switch {
+			case err != nil:
+				add(Warn, "%s: %v", tilde(file), err)
+			case len(holders) > 0:
+				add(Warn, "%s still holds secret_key in profile %s: the %s shim supplies the secret, remove it from the file", tilde(file), strings.Join(holders, ", "), tool)
+			}
+		}
+	}
+	return res
+}
+
+// toolPathCheck says whether tool goes through its shim, then a real tool.
+func toolPathCheck(tool, profiles, pathList string, tilde func(string) string) Result {
+	r := Result{Area: "Tools"}
+	shim := ""
+	for _, dir := range filepath.SplitList(pathList) {
+		if p := lookFirst(tool, dir); p != "" && toolshim.IsShim(p) {
+			shim = p
+			break
+		}
+	}
+	first := lookFirst(tool, pathList)
+	switch {
+	case shim == "" && first == "":
+		r.Status, r.Msg = Warn, fmt.Sprintf("%s (tools of %s) is not in PATH and has no tool shim", tool, profiles)
+	case shim == "" || first != shim:
+		r.Status, r.Msg = Warn, fmt.Sprintf("%s starts from %s without going through ai-secrets: the tool shim is not installed or does not come first", tool, tilde(first))
+	default:
+		real, err := toolshim.FindReal(tool, pathList, filepath.Dir(shim), shim)
+		if err != nil {
+			r.Status, r.Msg = Fail, fmt.Sprintf("the %s shim in %s has no real %s after it in PATH", tool, tilde(filepath.Dir(shim)), tool)
+		} else {
+			r.Status, r.Msg = OK, fmt.Sprintf("%s goes through ai-secrets, then %s", tool, tilde(real))
+		}
+	}
+	return r
+}
+
+// toolConfigChecks find, for a tool, its config file and the profiles in it
+// that still hold the secret, without reading the values.
+var toolConfigChecks = map[string]func(home string, getenv func(string) string) (string, []string, error){
+	"scw": func(home string, getenv func(string) string) (string, []string, error) {
+		p := toolshim.ScwConfigPath(home, getenv)
+		holders, err := toolshim.ScwSecretProfiles(p)
+		return p, holders, err
+	},
 }
 
 // profileServers lists the MCP servers of a profile and of its repos.
