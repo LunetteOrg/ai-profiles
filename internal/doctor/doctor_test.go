@@ -832,3 +832,86 @@ func TestDoctorStartupFileShimsAddedAgain(t *testing.T) {
 		t.Errorf("the backup must keep the file as it was before the first fix, got:\n%s", b)
 	}
 }
+
+func TestDoctorToolShims(t *testing.T) {
+	home, _ := fakeHome(t)
+	cfgPath := filepath.Join(home, "config.toml")
+	write(t, cfgPath, `default = "personal"
+[profiles.personal]
+account = "io@personal.example"
+[profiles.personal.tools.scw]
+env.SCW_SECRET_KEY = "op://V/Scaleway/secret key"
+`)
+	cfg, err := config.Load(cfgPath, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(home, "bin")
+	for _, c := range []string{"op", "ai-secrets"} {
+		write(t, filepath.Join(bin, c), "#!/bin/sh\n")
+		os.Chmod(filepath.Join(bin, c), 0o755)
+	}
+	shims := filepath.Join(home, ".local", "share", "ai-profiles", "tool-shims")
+	link(t, filepath.Join(bin, "ai-secrets"), filepath.Join(shims, "scw"))
+	realDir := filepath.Join(home, "real")
+	none := func(string) string { return "" }
+
+	// The shim without a real scw after it.
+	res := Run(Env{Home: home, Cfg: cfg, Self: "/nessuno", PathList: shims + ":" + bin, Getenv: none})
+	if !find(res, Fail, "scw") {
+		t.Errorf("a shim without the real tool after it should fail:\n%s", dump(res))
+	}
+
+	// The real scw after the shim.
+	write(t, filepath.Join(realDir, "scw"), "#!/bin/sh\n")
+	os.Chmod(filepath.Join(realDir, "scw"), 0o755)
+	res = Run(Env{Home: home, Cfg: cfg, Self: "/nessuno", PathList: shims + ":" + bin + ":" + realDir, Getenv: none})
+	if !find(res, OK, "scw goes through ai-secrets") || find(res, Fail, "scw") {
+		t.Errorf("shim then real scw should be fine:\n%s", dump(res))
+	}
+
+	// No shim: scw starts with the key from its config file, or none.
+	res = Run(Env{Home: home, Cfg: cfg, Self: "/nessuno", PathList: bin + ":" + realDir, Getenv: none})
+	if !find(res, Warn, "scw starts from") {
+		t.Errorf("a declared tool without its shim should be reported:\n%s", dump(res))
+	}
+
+	// The tool reference is checked like the profile's secrets.
+	res = Run(Env{Home: home, Cfg: cfg, Self: "/nessuno", PathList: shims + ":" + realDir, Getenv: none})
+	if !find(res, Fail, "op, which is not") {
+		t.Errorf("a tool's op:// reference without op in PATH should fail:\n%s", dump(res))
+	}
+}
+
+func TestDoctorToolConfigHoldsSecret(t *testing.T) {
+	home, _ := fakeHome(t)
+	cfgPath := filepath.Join(home, "config.toml")
+	write(t, cfgPath, `default = "personal"
+[profiles.personal]
+account = "io@personal.example"
+[profiles.personal.tools.scw]
+env.SCW_SECRET_KEY = "op://V/Scaleway/secret key"
+`)
+	cfg, err := config.Load(cfgPath, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const value = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	scw := filepath.Join(home, ".config", "scw", "config.yaml")
+	write(t, scw, "access_key: SCWXXXXXXXXXXXXXXXXX\nprofiles:\n  prod:\n    secret_key: "+value+"\n")
+	none := func(string) string { return "" }
+
+	res := Run(Env{Home: home, Cfg: cfg, Self: "/nessuno", PathList: "", Getenv: none})
+	if !find(res, Warn, filepath.Join("~", ".config", "scw", "config.yaml")) || !find(res, Warn, "prod") {
+		t.Errorf("secret_key in the scw config should be reported with file and profile:\n%s", dump(res))
+	}
+	if strings.Contains(dump(res), value) || strings.Contains(dump(res), "aaaaaaaa") {
+		t.Fatal("doctor printed the secret value")
+	}
+
+	write(t, scw, "access_key: SCWXXXXXXXXXXXXXXXXX\nprofiles:\n  prod:\n    default_zone: fr-par-1\n")
+	res = Run(Env{Home: home, Cfg: cfg, Self: "/nessuno", PathList: "", Getenv: none})
+	if find(res, Warn, "secret_key") {
+		t.Errorf("no secret_key left, nothing to report:\n%s", dump(res))
+	}
+}

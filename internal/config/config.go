@@ -55,6 +55,22 @@ type Profile struct {
 	Secrets map[string]string `toml:"secrets"`
 	// Desktop gives the profile its own Claude Desktop (ai-profile desktop).
 	Desktop *Desktop `toml:"desktop"`
+	// Tools are the CLIs that get their secrets from ai-secrets through a
+	// tool shim, by name.
+	Tools map[string]*Tool `toml:"tools"`
+}
+
+// Tool is a CLI run through an ai-secrets tool shim: Env maps the variables
+// it reads to secret references, resolved for that process only.
+type Tool struct {
+	Env map[string]string `toml:"env"`
+	// Reason is shown when the password manager asks; the tool's name when
+	// empty.
+	Reason string `toml:"reason"`
+	// DenyArgs are argument prefixes the shim refuses to run, global flags
+	// aside: subcommands that print the active configuration, secret
+	// included.
+	DenyArgs [][]string `toml:"deny_args"`
 }
 
 // Desktop is a profile's Claude Desktop.
@@ -245,6 +261,11 @@ func load(path, home string, swap map[string]string) (*Config, error) {
 				return nil, fmt.Errorf("%s: profile %s: secrets.%s uses Bitwarden, but the profile does not declare bitwarden = \"<account>\"", path, name, k)
 			}
 		}
+		for tool, t := range p.Tools {
+			if err := checkTool(tool, t, p.Bitwarden); err != nil {
+				return nil, fmt.Errorf("%s: profile %s: tools.%s: %w", path, name, tool, err)
+			}
+		}
 		if err := cfg.checkServers(p.MCP); err != nil {
 			return nil, fmt.Errorf("%s: profile %s: %w", path, name, err)
 		}
@@ -283,6 +304,47 @@ func load(path, home string, swap map[string]string) (*Config, error) {
 		return nil, fmt.Errorf("%s: default = %q is not a profile", path, cfg.Default)
 	}
 	return cfg, nil
+}
+
+// checkTool checks a tools.<name> section of a profile whose Bitwarden
+// account is bitwarden.
+func checkTool(name string, t *Tool, bitwarden string) error {
+	if name == "" || strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
+		return errors.New("not a command name")
+	}
+	if slices.Contains(KnownAgents, name) || name == "ai-secrets" || name == "ai-profile" {
+		return errors.New("an agent or ai-profiles' own command cannot be a tool")
+	}
+	if len(t.Env) == 0 {
+		return errors.New("no env.<VARIABLE> to resolve")
+	}
+	for k, v := range t.Env {
+		if !envName.MatchString(k) {
+			return fmt.Errorf("%q is not a valid variable name", k)
+		}
+		switch secrets.Tool(v) {
+		case "op", "bw":
+			if !secrets.IsRef(v) {
+				return fmt.Errorf("env.%s is an empty reference", k)
+			}
+		default:
+			return fmt.Errorf("env.%s must be an op:// or bw:// reference, not the value", k)
+		}
+		if secrets.Tool(v) == "bw" && bitwarden == "" && !strings.Contains(strings.TrimPrefix(v, "bw://"), "/") {
+			return fmt.Errorf("env.%s uses Bitwarden, but the profile does not declare bitwarden = \"<account>\"", k)
+		}
+	}
+	for _, prefix := range t.DenyArgs {
+		if len(prefix) == 0 {
+			return errors.New("deny_args has an empty prefix")
+		}
+		for _, a := range prefix {
+			if a == "" || strings.HasPrefix(a, "-") {
+				return fmt.Errorf("deny_args %q: arguments are subcommands, neither empty nor flags", prefix)
+			}
+		}
+	}
+	return nil
 }
 
 // mergePrivate adds the profiles, servers, default and files of the private
