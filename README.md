@@ -39,6 +39,11 @@ export PATH="$HOME/.local/share/ai-profiles/shims:$PATH"   # in the shell startu
 `ai-profile doctor` says when a startup file puts an agent's folder before the
 shims.
 
+A link points to the binary itself. Through a version manager's shim, the name
+reaches the version manager instead of `ai-profile` or `ai-secrets`: with mise,
+the target is `~/.local/share/mise/installs/github-lunette-org-ai-profiles/latest/ai-profile`
+(or `ai-secrets`), which follows the updates.
+
 The tool shims are links named after the CLIs declared in `tools.` (below,
 Secrets), pointing to `ai-secrets`, in a folder of their own that also comes
 before the real tools in `PATH`:
