@@ -122,6 +122,11 @@ func client(p secretagent.Paths) (*secretagent.Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Called through a tool shim, the executable is the tool's link: the
+	// agent starts from the file it points to, as ai-secrets.
+	if real, err := filepath.EvalSymlinks(self); err == nil {
+		self = real
+	}
 	return &secretagent.Client{Socket: p.Socket, Start: func() error { return secretagent.Start(self, p) }}, nil
 }
 

@@ -96,3 +96,43 @@ deny_args = [["config", "info"]]
 		t.Error("the real tool ran")
 	}
 }
+
+// Called through its link, the shim starts the agent as ai-secrets, not as
+// the tool: the request reaches the agent, which fails here only because op
+// is not in PATH.
+func TestShimStartsAgent(t *testing.T) {
+	dir := t.TempDir()
+	shim, env, marker := shimEnv(t, `default = "p"
+[profiles.p]
+dirs = [`+"\""+dir+"\""+`]
+[profiles.p.tools.fakecli]
+env.FAKE_SECRET = "op://Vault/Item/field"
+`)
+	// A short home: the agent's socket path must fit in sun_path.
+	home, err := os.MkdirTemp("", "as")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(home) })
+	env[0] = "HOME=" + home
+	bin := filepath.Join(filepath.Dir(filepath.Dir(shim)), "bin", "ai-secrets")
+	t.Cleanup(func() {
+		stop := exec.Command(bin, "stop")
+		stop.Env = env
+		stop.Run()
+	})
+
+	cmd := exec.Command("/bin/sh", "-c", "fakecli list")
+	cmd.Env, cmd.Dir = env, dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err == nil {
+		t.Fatal("without op the secret cannot be read: expected an error")
+	}
+	if strings.Contains(stderr.String(), "does not answer") || !strings.Contains(stderr.String(), "op") {
+		t.Errorf("the agent should start and fail on op, got: %s", stderr.String())
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("the real tool ran without its secret")
+	}
+}
