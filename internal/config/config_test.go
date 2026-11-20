@@ -478,3 +478,16 @@ deny_args = [["config", "info"], ["config", "get", "secret-key"]]
 		}
 	}
 }
+
+func TestLoadOnePasswordAccount(t *testing.T) {
+	cfg, err := Load(writeConfig(t, "default = \"p\"\n[profiles.p]\nonepassword = \"work\"\nsecrets.K = \"op://V/I/f?account=personal\"\n"), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Profiles["p"].OnePassword != "work" {
+		t.Errorf("onepassword = %q", cfg.Profiles["p"].OnePassword)
+	}
+	if _, err := Load(writeConfig(t, "default = \"p\"\n[profiles.p]\nsecrets.K = \"op://V/I/f?account=\"\n"), t.TempDir()); err == nil {
+		t.Error("an empty ?account= should be an error")
+	}
+}

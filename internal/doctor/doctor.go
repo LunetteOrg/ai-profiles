@@ -64,6 +64,9 @@ type Env struct {
 	Desktop       bool
 	DesktopSystem desktop.System
 	DesktopSource string
+	// OpAccounts lists what identifies the accounts op is signed in to
+	// (address, email, IDs), nil for op account list.
+	OpAccounts func() ([]string, error)
 	// BitwardenStatus returns bw status for an account, nil for the bw CLI.
 	BitwardenStatus func(*secrets.Bitwarden) (string, error)
 	// ObsidianConfig is Obsidian's obsidian.json, which lists the vaults
@@ -335,6 +338,7 @@ func Run(e Env) []Result {
 	if getenv == nil {
 		getenv = os.Getenv
 	}
+	stores, storesErr := secrets.LoadStores(e.Home)
 	for _, name := range e.Cfg.Names() {
 		p := e.Cfg.Profiles[name]
 		refs := e.Cfg.SecretsFor(p)
@@ -343,6 +347,13 @@ func Run(e Env) []Result {
 			for k, v := range t.Env {
 				refs["tool "+tool+" "+k] = v
 			}
+		}
+		// The profile's 1Password account, for the references that name none.
+		for k, v := range refs {
+			refs[k] = secrets.WithOpAccount(v, p.OnePassword)
+		}
+		if p.OnePassword != "" && storesErr == nil && stores.OnePassword[p.OnePassword] == nil {
+			add("Secrets "+name, Fail, "onepassword = %q is not a 1Password account of %s ([stores.1password.%s])", p.OnePassword, tilde(stores.Path), p.OnePassword)
 		}
 		// MCP servers with op:// references start inside op run.
 		for _, srv := range profileServers(p) {
@@ -360,6 +371,16 @@ func Run(e Env) []Result {
 		tools := map[string]bool{}
 		for _, k := range slices.Sorted(maps.Keys(refs)) {
 			ref := refs[k]
+			if secrets.IsOp(ref) && storesErr == nil {
+				switch acc, _ := secrets.SplitOpRef(ref); {
+				case acc != "" && stores.OnePassword[acc] == nil:
+					add(area, Fail, "%s: 1Password account %q is not in %s ([stores.1password.%s])", k, acc, tilde(stores.Path), acc)
+					problems++
+				case acc == "" && len(stores.OnePassword) > 1:
+					add(area, Warn, "%s: names no 1Password account and op does not choose among several: set onepassword in the profile or ?account= in the reference", k)
+					problems++
+				}
+			}
 			switch tool := secrets.Tool(ref); tool {
 			case "":
 				if _, err := (&secrets.Resolver{Home: e.Home, Getenv: getenv}).Resolve(ref); err != nil {
@@ -431,6 +452,23 @@ func Run(e Env) []Result {
 		mise := filepath.Join(d, "mise.toml")
 		if b, err := os.ReadFile(mise); err == nil && strings.Contains(string(b), "CLAUDE_CONFIG_DIR") {
 			add("Profile selection", Warn, "%s sets CLAUDE_CONFIG_DIR: a duplicate of config.toml", tilde(mise))
+		}
+	}
+
+	// 1Password accounts op is not signed in to.
+	if storesErr == nil && len(stores.OnePassword) > 0 && lookFirst("op", e.PathList) != "" {
+		list := e.OpAccounts
+		if list == nil {
+			list = opAccounts
+		}
+		if known, err := list(); err != nil {
+			add("1Password", Warn, "op account list: %v", err)
+		} else {
+			for _, n := range slices.Sorted(maps.Keys(stores.OnePassword)) {
+				if acc := stores.OnePassword[n].Account; !slices.Contains(known, acc) {
+					add("1Password", Warn, "account %s (%s) is not among those op is signed in to: op account add --address %s", n, acc, acc)
+				}
+			}
 		}
 	}
 
@@ -539,6 +577,28 @@ var toolConfigChecks = map[string]func(home string, getenv func(string) string) 
 		holders, err := toolshim.ScwSecretProfiles(p)
 		return p, holders, err
 	},
+}
+
+// opAccounts lists what identifies each account op is signed in to.
+func opAccounts() ([]string, error) {
+	out, err := exec.Command("op", "account", "list", "--format", "json").Output()
+	if err != nil {
+		return nil, err
+	}
+	var list []struct {
+		URL         string `json:"url"`
+		Email       string `json:"email"`
+		UserUUID    string `json:"user_uuid"`
+		AccountUUID string `json:"account_uuid"`
+	}
+	if err := json.Unmarshal(out, &list); err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, a := range list {
+		ids = append(ids, a.URL, a.Email, a.UserUUID, a.AccountUUID)
+	}
+	return ids, nil
 }
 
 // profileServers lists the MCP servers of a profile and of its repos.

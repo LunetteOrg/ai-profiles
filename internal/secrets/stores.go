@@ -20,7 +20,10 @@ type Stores struct {
 	Path       string
 	TTL        time.Duration
 	OpIsolated bool // every op read in a session of its own
-	Bitwarden  map[string]*Bitwarden
+	// OnePassword are the 1Password accounts references can name
+	// (?account=<name>); without any, op picks the account.
+	OnePassword map[string]*OnePassword
+	Bitwarden   map[string]*Bitwarden
 	// Private names the file with the sensitive part (accounts, servers,
 	// references) and the commands that back it up and restore it.
 	Private private.Settings
@@ -39,10 +42,9 @@ func StoresPath(home string) string {
 type storesFile struct {
 	TTL    string `toml:"ttl"`
 	Stores struct {
-		OnePassword struct {
-			Read string `toml:"read"`
-		} `toml:"1password"`
-		Bitwarden map[string]struct {
+		// OnePassword holds read and the accounts' tables.
+		OnePassword map[string]any `toml:"1password"`
+		Bitwarden   map[string]struct {
 			Server        string `toml:"server"`
 			Unlock        string `toml:"unlock"`
 			Password      string `toml:"password"`
@@ -71,7 +73,7 @@ func LoadStores(home string) (*Stores, error) {
 			return nil, err
 		}
 	}
-	s := &Stores{Path: path, TTL: DefaultTTL, OpIsolated: true, Bitwarden: map[string]*Bitwarden{}, Private: settings}
+	s := &Stores{Path: path, TTL: DefaultTTL, OpIsolated: true, OnePassword: map[string]*OnePassword{}, Bitwarden: map[string]*Bitwarden{}, Private: settings}
 	for _, f := range raw.Files {
 		s.Files = append(s.Files, expandHome(f, home))
 	}
@@ -82,12 +84,16 @@ func LoadStores(home string) (*Stores, error) {
 		}
 		s.TTL = d
 	}
-	switch raw.Stores.OnePassword.Read {
+	read := ""
+	if err := parseOnePassword(raw.Stores.OnePassword, path, s, &read); err != nil {
+		return nil, err
+	}
+	switch read {
 	case "", "isolated":
 	case "shared":
 		s.OpIsolated = false
 	default:
-		return nil, fmt.Errorf("%s: stores.1password.read = %q: use \"isolated\" or \"shared\"", path, raw.Stores.OnePassword.Read)
+		return nil, fmt.Errorf("%s: stores.1password.read = %q: use \"isolated\" or \"shared\"", path, read)
 	}
 	for name, b := range raw.Stores.Bitwarden {
 		acc := &Bitwarden{
@@ -142,11 +148,14 @@ func mergePrivate(raw *storesFile, path, file string) error {
 		}
 		raw.TTL = priv.TTL
 	}
-	if r := priv.Stores.OnePassword.Read; r != "" {
-		if raw.Stores.OnePassword.Read != "" {
-			return both("stores.1password.read")
+	if raw.Stores.OnePassword == nil {
+		raw.Stores.OnePassword = map[string]any{}
+	}
+	for k, v := range priv.Stores.OnePassword {
+		if _, dup := raw.Stores.OnePassword[k]; dup {
+			return both("stores.1password." + k)
 		}
-		raw.Stores.OnePassword.Read = r
+		raw.Stores.OnePassword[k] = v
 	}
 	if raw.Stores.Bitwarden == nil {
 		raw.Stores.Bitwarden = priv.Stores.Bitwarden

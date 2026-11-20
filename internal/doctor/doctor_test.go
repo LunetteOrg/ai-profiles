@@ -915,3 +915,67 @@ env.SCW_SECRET_KEY = "op://V/Scaleway/secret key"
 		t.Errorf("no secret_key left, nothing to report:\n%s", dump(res))
 	}
 }
+
+func TestDoctorOnePasswordAccounts(t *testing.T) {
+	home, _ := fakeHome(t)
+	write(t, filepath.Join(home, ".config", "ai-secrets", "config.toml"), `[stores.1password.personal]
+account = "my.1password.com"
+[stores.1password.work]
+account = "work.1password.eu"
+`)
+	cfgPath := filepath.Join(home, "config.toml")
+	write(t, cfgPath, `default = "personal"
+[profiles.personal]
+account = "io@personal.example"
+secrets.A = "op://V/I/f"
+[profiles.client-w]
+onepassword = "work"
+secrets.B = "op://V/I/f"
+secrets.C = "op://V/I/f?account=nessuno"
+[profiles.client-w.tools.scw]
+env.SCW_SECRET_KEY = "op://V/Scaleway/secret key"
+`)
+	cfg, err := config.Load(cfgPath, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(home, "bin")
+	for _, c := range []string{"op", "ai-secrets"} {
+		write(t, filepath.Join(bin, c), "#!/bin/sh\n")
+		os.Chmod(filepath.Join(bin, c), 0o755)
+	}
+	none := func(string) string { return "" }
+	signedIn := func() ([]string, error) { return []string{"my.1password.com", "me@example.com"}, nil }
+
+	res := Run(Env{Home: home, Cfg: cfg, Self: "/nessuno", PathList: bin, Getenv: none, OpAccounts: signedIn})
+	out := dump(res)
+	if !find(res, Warn, "Secrets personal A:") {
+		t.Errorf("with two accounts, a reference without one should be reported:\n%s", out)
+	}
+	if !find(res, Fail, "nessuno") {
+		t.Errorf("an undeclared account should fail:\n%s", out)
+	}
+	if find(res, Warn, "Secrets client-w B:") || find(res, Warn, "SCW_SECRET_KEY") {
+		t.Errorf("the profile's onepassword covers its references and tools:\n%s", out)
+	}
+	if !find(res, Warn, "work.1password.eu") || find(res, Warn, "my.1password.com") {
+		t.Errorf("a declared account op is not signed in to should be reported, and only that one:\n%s", out)
+	}
+	if strings.Contains(out, "valore") {
+		t.Fatal("doctor printed a value")
+	}
+
+	write(t, cfgPath, `default = "personal"
+[profiles.personal]
+account = "io@personal.example"
+onepassword = "altro"
+`)
+	cfg, err = config.Load(cfgPath, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res = Run(Env{Home: home, Cfg: cfg, Self: "/nessuno", PathList: bin, Getenv: none, OpAccounts: signedIn})
+	if !find(res, Fail, "altro") {
+		t.Errorf("a profile naming an undeclared account should fail:\n%s", dump(res))
+	}
+}

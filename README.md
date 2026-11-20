@@ -218,7 +218,7 @@ The configuration holds only references to secrets, never the values:
 
 | Reference | Source | Where it applies |
 |---|---|---|
-| `op://<vault>/<item>/<field>` | 1Password, with the app's approval | MCP servers and provider keys |
+| `op://<vault>/<item>/<field>`, `op://…?account=<account>` | 1Password, with the app's approval, in the account named in the reference or the profile's (`onepassword = "<account>"`) | MCP servers (with the account named, when there are several) and provider keys |
 | `bw://<account>/<item>`, `bw://<item>` | Bitwarden, the account named in the reference or the profile's (`bitwarden = "<account>"`) | MCP servers (with the account named) and provider keys |
 | `env:<VARIABLE>` | environment or `~/.env` | MCP servers and provider keys |
 
@@ -284,7 +284,7 @@ user can enter, and starts by itself on the first request:
 
 | Command | What it does |
 |---|---|
-| `ai-secrets run [--reason <reason>] -- <command>` | replaces the `op://` and `bw://<account>/<item>` references in the environment with their values and launches the command |
+| `ai-secrets run [--reason <reason>] [--account <account>] -- <command>` | replaces the `op://` and `bw://<account>/<item>` references in the environment with their values and launches the command; `--account` is the 1Password account of the `op://` references that name none |
 | `ai-secrets status` | secrets in memory, with variable names and expiry, without values |
 | `ai-secrets lock` | forgets all secrets |
 | `ai-secrets stop` | stops the agent |
@@ -302,6 +302,12 @@ ttl = "30m"
 [stores.1password]
 read = "isolated"                 # or "shared"
 
+[stores.1password.personal]
+account = "my.1password.com"      # as op --account takes it: address, email or ID
+
+[stores.1password.discentis]
+account = "discentis.1password.eu"
+
 [stores.bitwarden.client-a]
 server = "https://vault.bitwarden.eu"
 unlock = "password"               # or "biometric", when the bw CLI has it
@@ -313,6 +319,13 @@ lock_after_read = true
   of its own, and 1Password scopes an approval to the session that asked, so
   each new secret gets its own approval. With `"shared"` one approval covers the
   reads of the following ten minutes.
+- **1Password accounts**: with several accounts signed in to `op`, a reference
+  reads from the account it names (`?account=<name>`), else from the profile's
+  `onepassword`; `ai-secrets` passes it to `op read --account`. The agent keeps
+  values apart by account, since two accounts can hold vaults and items with
+  the same name. Without accounts declared, `op` picks: the only one signed
+  in, or `OP_ACCOUNT`. The Bitwarden master password and MCP servers have no
+  profile: their references name the account.
 - **Bitwarden, `lock_after_read = true`**: every request is a full login: the
   master password is read from 1Password, used for `bw unlock` and dropped, the
   values are read, then `bw lock`. With `false` the account stays unlocked for
@@ -532,7 +545,7 @@ repairs what can be repaired safely and keeps a copy of what it changes.
 |---|---|
 | Accounts | A profile logged in with an account it does not list; two profiles on the same account. |
 | Shared parts | A link broken or replaced by a real file; an agent without its link to `~/.agents/AGENTS.md`; a `~/.claude/CLAUDE.md` that has reappeared. |
-| Secrets | A reference that does not resolve; `ai-secrets`, `op` or `bw` missing from `PATH`; a Bitwarden account not logged in; a missing `env:` variable. |
+| Secrets | A reference that does not resolve; `ai-secrets`, `op` or `bw` missing from `PATH`; a Bitwarden account not logged in; a missing `env:` variable; a 1Password account named but not declared, or not signed in to `op`; with several accounts, an `op://` reference that names none. |
 | MCP | Pending `sync` changes; servers in `~/.claude.json`, visible to sessions without a profile; a credential folder with files `only` does not allow. |
 | Folders | A `[[folders]]` entry with one profile or a missing folder; a `mise.toml`, `mise.local.toml` or `.envrc` that sets an agent's folder. |
 | Tools | A tool shim missing, behind the real tool, or with no real tool after it in `PATH`; a tool's config file that still holds the secret (for `scw`, a `secret_key` in any profile of its `config.yaml`, named without the value). |
