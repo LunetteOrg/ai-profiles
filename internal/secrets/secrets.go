@@ -6,9 +6,11 @@ package secrets
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,9 +27,30 @@ type Runner func(extraEnv []string, name string, args ...string) (string, error)
 func Exec(extraEnv []string, name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
 	cmd.Env = append(os.Environ(), extraEnv...)
-	cmd.Stdin, cmd.Stderr = os.Stdin, os.Stderr
+	cmd.Stdin = os.Stdin
+	return output(cmd)
+}
+
+// RunError is a CLI that failed, with what it wrote on standard error: the
+// password managers' messages, never a value.
+type RunError struct {
+	Err    error
+	Stderr string
+}
+
+func (e *RunError) Error() string { return e.Err.Error() }
+func (e *RunError) Unwrap() error { return e.Err }
+
+// output runs cmd with its standard error going to ours (the terminal, or the
+// agent's log) and kept for the error.
+func output(cmd *exec.Cmd) (string, error) {
+	var stderr bytes.Buffer
+	cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
 	out, err := cmd.Output()
-	return string(out), err
+	if err != nil {
+		return string(out), &RunError{Err: err, Stderr: stderr.String()}
+	}
+	return string(out), nil
 }
 
 var schemes = []struct{ prefix, tool string }{
@@ -143,10 +166,7 @@ func (r *Resolver) Resolve(ref string) (string, error) {
 			return "", acc.error
 		}
 		if err != nil {
-			if names := r.opAccounts(); len(names) > 1 && !HasOpAccount(ref) {
-				return "", fmt.Errorf("%s: no 1Password account for this reference (declared: %s): add ?account=<name>, or --account <name> to ai-secrets run: %w", ref, strings.Join(names, ", "), err)
-			}
-			return "", fmt.Errorf("%s: op read failed (1Password approved?): %w", ref, err)
+			return "", r.opFailure(ref, err)
 		}
 		return out, nil
 	case strings.HasPrefix(ref, "bw://"):
