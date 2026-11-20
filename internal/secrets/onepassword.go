@@ -2,6 +2,8 @@ package secrets
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 )
 
@@ -112,3 +114,11 @@ func parseOnePassword(raw map[string]any, path string, s *Stores, read *string) 
 type accountError struct{ error }
 
 func (e *accountError) Unwrap() error { return e.error }
+
+// opAccounts are the names of the declared 1Password accounts, sorted.
+func (r *Resolver) opAccounts() []string {
+	if r.Stores == nil {
+		return nil
+	}
+	return slices.Sorted(maps.Keys(r.Stores.OnePassword))
+}

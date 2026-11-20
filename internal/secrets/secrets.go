@@ -143,6 +143,9 @@ func (r *Resolver) Resolve(ref string) (string, error) {
 			return "", acc.error
 		}
 		if err != nil {
+			if names := r.opAccounts(); len(names) > 1 && !HasOpAccount(ref) {
+				return "", fmt.Errorf("%s: no 1Password account for this reference (declared: %s): add ?account=<name>, or --account <name> to ai-secrets run: %w", ref, strings.Join(names, ", "), err)
+			}
 			return "", fmt.Errorf("%s: op read failed (1Password approved?): %w", ref, err)
 		}
 		return out, nil

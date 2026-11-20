@@ -62,6 +62,20 @@ func Lookup(cfg *config.Config, dir, tool string) (*Section, error) {
 	}, nil
 }
 
+// FolderOpAccount is the onepassword of dir's profile (worktrees included,
+// as ai-profile chooses it): the 1Password account of op:// references that
+// name none. Empty without a configuration or without onepassword.
+func FolderOpAccount(cfg *config.Config, dir string) (string, error) {
+	if cfg == nil {
+		return "", nil
+	}
+	m, err := cfg.Resolve(gitroot.LookupDir(dir))
+	if err != nil {
+		return "", err
+	}
+	return m.Profile.OnePassword, nil
+}
+
 // Denied returns the first prefix of deny that args start with, global flags
 // aside, or nil. A flag without "=" may or may not take the next argument as
 // its value: args are denied when either reading matches, so an unknown

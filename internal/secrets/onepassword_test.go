@@ -1,6 +1,7 @@
 package secrets
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -129,5 +130,25 @@ func TestBitwardenPasswordFromOpAccount(t *testing.T) {
 		if c.name == "op" && strings.Join(c.args, "|") != "read|--account|my.1password.com|--no-newline|op://Private/bw/password" {
 			t.Errorf("master password read: op %v", c.args)
 		}
+	}
+}
+
+func TestOpReadWithoutAccountAmongSeveral(t *testing.T) {
+	r := &Resolver{
+		Getenv: func(string) string { return "" },
+		Run: func(env []string, name string, args ...string) (string, error) {
+			return "", errors.New("exit status 1")
+		},
+		Stores: &Stores{OnePassword: map[string]*OnePassword{
+			"personal": {Name: "personal", Account: "my.1password.com"},
+			"work":     {Name: "work", Account: "work.1password.eu"},
+		}},
+	}
+	_, err := r.Resolve("op://V/I/f")
+	if err == nil || !strings.Contains(err.Error(), "no 1Password account") || !strings.Contains(err.Error(), "?account=") || !strings.Contains(err.Error(), "personal, work") {
+		t.Errorf("a failed read without an account among several should say so, got %v", err)
+	}
+	if _, err := r.Resolve("op://V/I/f?account=work"); err == nil || strings.Contains(err.Error(), "no 1Password account") {
+		t.Errorf("with an account, the usual message: %v", err)
 	}
 }

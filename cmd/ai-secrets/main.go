@@ -39,7 +39,8 @@ const helpText = `ai-secrets: 1Password and Bitwarden secrets kept in memory for
                        replaces the op:// and bw://<account>/<item> references
                        in the environment with their values and runs the command;
                        --account is the 1Password account ([stores.1password.<name>])
-                       of op:// references without ?account=<name>
+                       of op:// references without ?account=<name>; by default
+                       the onepassword of the current folder's profile
   ai-secrets tool add <tool> --vault <vault> [--item <title>] [--profile <profile>]
                        [--account <1password account>] [--from <tool profile>]
                        moves the tool's key from its config file to a new
@@ -197,7 +198,7 @@ func run(args []string) error {
 		printRestore(os.Stdout, res)
 		return nil
 	case "run":
-		return runCommand(p, args[1:])
+		return runCommand(home, p, args[1:])
 	case "tool":
 		if len(args) < 2 || args[1] != "add" {
 			return errors.New(toolAddUsage)
@@ -229,6 +230,41 @@ func run(args []string) error {
 }
 
 const toolAddUsage = "usage: ai-secrets tool add <tool> --vault <vault> [--item <title>] [--profile <profile>] [--account <1password account>] [--from <tool profile>]"
+
+// needsAccount reports whether env holds an op:// reference that names no
+// 1Password account.
+func needsAccount(env []string) bool {
+	for _, kv := range env {
+		_, v, _ := strings.Cut(kv, "=")
+		if secrets.IsOp(v) && !secrets.HasOpAccount(v) {
+			return true
+		}
+	}
+	return false
+}
+
+// folderAccount is the onepassword of the current folder's profile, empty
+// without one. A configuration that does not load leaves the references as
+// they are, with a warning: run also starts MCP servers, which must not
+// depend on it.
+func folderAccount(home string) string {
+	path := config.DefaultPath(home, os.Getenv)
+	if !config.Exists(path) {
+		return ""
+	}
+	cfg, err := config.Load(path, home)
+	if err == nil {
+		cfg.LastUsed = func(dir string) string { return lastused.Get(home, dir) }
+		var cwd, account string
+		if cwd, err = os.Getwd(); err == nil {
+			if account, err = toolshim.FolderOpAccount(cfg, cwd); err == nil {
+				return account
+			}
+		}
+	}
+	fmt.Fprintf(os.Stderr, "ai-secrets: no 1Password account from the folder's profile: %v\n", err)
+	return ""
+}
 
 // runToolAdd moves a tool's secret from its config file into 1Password and
 // sets up its tool shim (toolshim.Adder).
@@ -348,7 +384,7 @@ func printRestore(w io.Writer, res private.Result) {
 	}
 }
 
-func runCommand(p secretagent.Paths, args []string) error {
+func runCommand(home string, p secretagent.Paths, args []string) error {
 	const use = "usage: ai-secrets run [--reason <reason>] [--account <1password account>] -- <command> [<arguments>]"
 	reason, account := "", ""
 	for len(args) > 0 && args[0] != "--" {
@@ -365,6 +401,9 @@ func runCommand(p secretagent.Paths, args []string) error {
 		return errors.New(use)
 	}
 	cmd := args[1:]
+	if account == "" && needsAccount(os.Environ()) {
+		account = folderAccount(home)
+	}
 	refs := map[string]string{}
 	for _, kv := range os.Environ() {
 		k, v, _ := strings.Cut(kv, "=")
