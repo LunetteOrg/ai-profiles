@@ -44,7 +44,7 @@ type storesFile struct {
 	Stores struct {
 		// OnePassword holds read and the accounts' tables.
 		OnePassword map[string]any `toml:"1password"`
-		Bitwarden map[string]struct {
+		Bitwarden   map[string]struct {
 			Server        string `toml:"server"`
 			Unlock        string `toml:"unlock"`
 			Password      string `toml:"password"`
