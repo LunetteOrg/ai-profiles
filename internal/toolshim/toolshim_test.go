@@ -434,3 +434,24 @@ func TestLinkTarget(t *testing.T) {
 		t.Errorf("with mise's latest: %q, want %q", got, want)
 	}
 }
+
+func TestFolderOpAccount(t *testing.T) {
+	home := t.TempDir()
+	cfg := loadConfig(t, home, `default = "personal"
+[profiles.personal]
+[profiles.client]
+dirs = ["~/Developer/client"]
+onepassword = "work"
+`)
+	dir := filepath.Join(home, "Developer", "client", "repo")
+	os.MkdirAll(dir, 0o755)
+	if got, err := FolderOpAccount(cfg, dir); err != nil || got != "work" {
+		t.Errorf("in the client's folder: %q, %v; want work", got, err)
+	}
+	if got, err := FolderOpAccount(cfg, home); err != nil || got != "" {
+		t.Errorf("a profile without onepassword: %q, %v; want none", got, err)
+	}
+	if got, err := FolderOpAccount(nil, dir); err != nil || got != "" {
+		t.Errorf("no configuration: %q, %v; want none", got, err)
+	}
+}

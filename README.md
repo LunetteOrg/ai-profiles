@@ -317,7 +317,7 @@ user can enter, and starts by itself on the first request:
 
 | Command | What it does |
 |---|---|
-| `ai-secrets run [--reason <reason>] [--account <account>] -- <command>` | replaces the `op://` and `bw://<account>/<item>` references in the environment with their values and launches the command; `--account` is the 1Password account of the `op://` references that name none |
+| `ai-secrets run [--reason <reason>] [--account <account>] -- <command>` | replaces the `op://` and `bw://<account>/<item>` references in the environment with their values and launches the command; `--account` is the 1Password account of the `op://` references that name none, by default the `onepassword` of the folder's profile |
 | `ai-secrets tool add <tool> --vault <vault> [--item <title>] [--profile <profile>] [--account <account>] [--from <tool profile>]` | moves a tool's key from its config file into a new 1Password item and sets up its tool shim (below) |
 | `ai-secrets status` | secrets in memory, with variable names and expiry, without values |
 | `ai-secrets lock` | forgets all secrets |
@@ -355,7 +355,9 @@ lock_after_read = true
   reads of the following ten minutes.
 - **1Password accounts**: with several accounts signed in to `op`, a reference
   reads from the account it names (`?account=<name>`), else from the profile's
-  `onepassword`; `ai-secrets` passes it to `op read --account`. The agent keeps
+  `onepassword`: the profile `ai-profile` launches or the tool shim runs in, or
+  for `ai-secrets run` the `--account` given, else the folder's profile.
+  `ai-secrets` passes it to `op read --account`. The agent keeps
   values apart by account, since two accounts can hold vaults and items with
   the same name. Without accounts declared, `op` picks: the only one signed
   in, or `OP_ACCOUNT`. The Bitwarden master password and MCP servers have no

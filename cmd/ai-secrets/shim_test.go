@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -134,5 +135,49 @@ env.FAKE_SECRET = "op://Vault/Item/field"
 	}
 	if _, err := os.Stat(marker); err == nil {
 		t.Error("the real tool ran without its secret")
+	}
+}
+
+// ai-secrets run takes the 1Password account of the folder's profile for
+// references that name none: the reference that reaches the agent carries
+// it (the read then fails here only because op is not in PATH).
+func TestRunTakesFolderAccount(t *testing.T) {
+	dir := t.TempDir()
+	_, env, _ := shimEnv(t, `default = "p"
+[profiles.p]
+[profiles.client]
+dirs = [`+"\""+dir+"\""+`]
+onepassword = "work"
+`)
+	home, err := os.MkdirTemp("", "as")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(home) })
+	os.MkdirAll(filepath.Join(home, ".config", "ai-secrets"), 0o700)
+	os.WriteFile(filepath.Join(home, ".config", "ai-secrets", "config.toml"), []byte("[stores.1password.work]\naccount = \"work.1password.eu\"\n[stores.1password.personal]\naccount = \"my.1password.com\"\n"), 0o600)
+	env[0] = "HOME=" + home
+	bin := filepath.Join(filepath.Dir(strings.TrimPrefix(env[2], "AI_PROFILES_CONFIG=")), "bin", "ai-secrets")
+	t.Cleanup(func() {
+		stop := exec.Command(bin, "stop")
+		stop.Env = env
+		stop.Run()
+	})
+	run := func(extra string, args ...string) string {
+		cmd := exec.Command(bin, append([]string{"run"}, append(args, "--", "/usr/bin/true")...)...)
+		cmd.Env, cmd.Dir = append(slices.Clone(env), "FAKE="+extra), dir
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		cmd.Run()
+		return stderr.String()
+	}
+	if out := run("op://V/I/f"); !strings.Contains(out, "op://V/I/f?account=work") {
+		t.Errorf("the folder's account should reach the agent: %s", out)
+	}
+	if out := run("op://V/I/f", "--account", "personal"); !strings.Contains(out, "op://V/I/f?account=personal") {
+		t.Errorf("--account comes before the folder's: %s", out)
+	}
+	if out := run("op://V/I/f?account=personal"); !strings.Contains(out, "op://V/I/f?account=personal") || strings.Contains(out, "account=work") {
+		t.Errorf("the reference's account comes first: %s", out)
 	}
 }
