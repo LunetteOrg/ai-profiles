@@ -979,3 +979,26 @@ onepassword = "altro"
 		t.Errorf("a profile naming an undeclared account should fail:\n%s", dump(res))
 	}
 }
+
+func TestDoctorToolConfigCommentedSecret(t *testing.T) {
+	home, _ := fakeHome(t)
+	cfgPath := filepath.Join(home, "config.toml")
+	write(t, cfgPath, `default = "personal"
+[profiles.personal]
+account = "io@personal.example"
+[profiles.personal.tools.scw]
+env.SCW_SECRET_KEY = "op://V/Scaleway/secret key"
+`)
+	cfg, err := config.Load(cfgPath, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(home, ".config", "scw", "config.yaml"), "access_key: SCWX\nprofiles:\n  prod:\n    # secret_key: old-value-here\n")
+	res := Run(Env{Home: home, Cfg: cfg, Self: "/nessuno", PathList: "", Getenv: func(string) string { return "" }})
+	if !find(res, Warn, "commented") || !find(res, Warn, "line 4") {
+		t.Errorf("a commented-out secret_key should be reported with its line:\n%s", dump(res))
+	}
+	if strings.Contains(dump(res), "old-value-here") {
+		t.Fatal("doctor printed the value")
+	}
+}

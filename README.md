@@ -262,16 +262,49 @@ file nor in the agent's environment.
 
 ```toml
 [profiles.client-a.tools.scw]
+env.SCW_ACCESS_KEY = "op://Client-a/Scaleway/access key"
 env.SCW_SECRET_KEY = "op://Client-a/Scaleway/secret key"
 reason = "Scaleway CLI"
 deny_args = [["config", "info"], ["config", "dump"], ["config", "get", "secret-key"], ["config", "get", "secret_key"]]
 ```
+
+The section sets the whole key pair: `config.yaml` is one file for every
+client, and with the access key from the profile too, each profile uses its own
+pair whichever scw profile the file has active.
 
 `deny_args` lists the subcommands the shim refuses to run: `scw config info`,
 `dump` and `get secret-key` print the active configuration, environment
 included, so they would print the key. A subcommand matches after the global
 flags (`scw -p prod config info` is refused); a refused command exits with an
 error and neither asks for the key nor runs `scw`.
+
+`ai-secrets tool add scw --vault Client-a` sets this up from the key in the
+tool's config file, for the tools it has a preset for (`scw`). Each step stops
+the command on failure before the next:
+
+1. reads the key pair of the tool's profile (`--from`, by default scw's
+   `active_profile`) from its config file;
+2. creates a 1Password item with one field per variable, the values on
+   `op item create`'s stdin, in the account of `--account` or of the profile's
+   `onepassword`;
+3. reads the new references back through the agent and compares them with the
+   file, in its own process; on a mismatch nothing else changes and the message
+   names the item to delete;
+4. writes the section above in the profile of the folder (or `--profile`), in
+   the file that defines the profile;
+5. links the tool shim, through mise's `latest` folder when mise installed
+   `ai-secrets`;
+6. removes the secret key from the tool's profile, and commented-out secret
+   keys anywhere in the file.
+
+No step prints a value. When the real tool comes from mise, `mise activate`
+puts it before the tool shims in interactive shells; the mise configuration
+that activates the tool then takes the shims too:
+
+```toml
+[env]
+_.path = ["~/.local/share/ai-profiles/tool-shims"]
+```
 
 The shim finds the folder's profile as `ai-profile` does. When that profile
 declares the tool, it resolves the `env.` references as `ai-secrets run` does,
@@ -285,6 +318,7 @@ user can enter, and starts by itself on the first request:
 | Command | What it does |
 |---|---|
 | `ai-secrets run [--reason <reason>] [--account <account>] -- <command>` | replaces the `op://` and `bw://<account>/<item>` references in the environment with their values and launches the command; `--account` is the 1Password account of the `op://` references that name none |
+| `ai-secrets tool add <tool> --vault <vault> [--item <title>] [--profile <profile>] [--account <account>] [--from <tool profile>]` | moves a tool's key from its config file into a new 1Password item and sets up its tool shim (below) |
 | `ai-secrets status` | secrets in memory, with variable names and expiry, without values |
 | `ai-secrets lock` | forgets all secrets |
 | `ai-secrets stop` | stops the agent |
@@ -548,7 +582,7 @@ repairs what can be repaired safely and keeps a copy of what it changes.
 | Secrets | A reference that does not resolve; `ai-secrets`, `op` or `bw` missing from `PATH`; a Bitwarden account not logged in; a missing `env:` variable; a 1Password account named but not declared, or not signed in to `op`; with several accounts, an `op://` reference that names none. |
 | MCP | Pending `sync` changes; servers in `~/.claude.json`, visible to sessions without a profile; a credential folder with files `only` does not allow. |
 | Folders | A `[[folders]]` entry with one profile or a missing folder; a `mise.toml`, `mise.local.toml` or `.envrc` that sets an agent's folder. |
-| Tools | A tool shim missing, behind the real tool, or with no real tool after it in `PATH`; a tool's config file that still holds the secret (for `scw`, a `secret_key` in any profile of its `config.yaml`, named without the value). |
+| Tools | A tool shim missing, behind the real tool, or with no real tool after it in `PATH`; a tool's config file that still holds the secret (for `scw`, a `secret_key` in any profile of its `config.yaml`, or a commented-out one, named without the value). |
 | `PATH` | A shim that does not come before the real agent, including lines of the zsh startup files and of the bash login file that put an agent's folder first. |
 | Desktop | A copy open without its data folder, behind Claude.app, without its icon or with leftovers of a swap; a launcher missing or not written by `ai-profile`. |
 | Claudian | A vault whose Claudian does not pass the vault's profile in `CLAUDE_CONFIG_DIR`. |

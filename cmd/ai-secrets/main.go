@@ -13,10 +13,13 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
@@ -37,6 +40,11 @@ const helpText = `ai-secrets: 1Password and Bitwarden secrets kept in memory for
                        in the environment with their values and runs the command;
                        --account is the 1Password account ([stores.1password.<name>])
                        of op:// references without ?account=<name>
+  ai-secrets tool add <tool> --vault <vault> [--item <title>] [--profile <profile>]
+                       [--account <1password account>] [--from <tool profile>]
+                       moves the tool's key from its config file to a new
+                       1Password item, writes the tool's section in the profile
+                       and links its tool shim (tools: scw)
   ai-secrets status    secrets in memory and their expiry, without values
   ai-secrets lock      forgets every secret
   ai-secrets stop      stops the agent
@@ -190,6 +198,11 @@ func run(args []string) error {
 		return nil
 	case "run":
 		return runCommand(p, args[1:])
+	case "tool":
+		if len(args) < 2 || args[1] != "add" {
+			return errors.New(toolAddUsage)
+		}
+		return runToolAdd(home, p, args[2:])
 	case "status":
 		resp, err := (&secretagent.Client{Socket: p.Socket}).Do(secretagent.Request{Op: "status"})
 		if err != nil {
@@ -213,6 +226,89 @@ func run(args []string) error {
 		return nil
 	}
 	return fmt.Errorf("unknown command %q (ai-secrets help)", args[0])
+}
+
+const toolAddUsage = "usage: ai-secrets tool add <tool> --vault <vault> [--item <title>] [--profile <profile>] [--account <1password account>] [--from <tool profile>]"
+
+// runToolAdd moves a tool's secret from its config file into 1Password and
+// sets up its tool shim (toolshim.Adder).
+func runToolAdd(home string, p secretagent.Paths, args []string) error {
+	if !shimSupported {
+		return errors.New("tool shims are not available on Windows yet")
+	}
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return errors.New(toolAddUsage)
+	}
+	o := toolshim.AddOptions{Tool: args[0]}
+	flags := map[string]*string{"--vault": &o.Vault, "--item": &o.Item, "--profile": &o.Profile, "--account": &o.Account, "--from": &o.From}
+	for rest := args[1:]; len(rest) > 0; rest = rest[2:] {
+		dst, ok := flags[rest[0]]
+		if !ok || len(rest) < 2 {
+			return errors.New(toolAddUsage)
+		}
+		*dst = rest[1]
+	}
+	cfgPath := config.DefaultPath(home, os.Getenv)
+	cfg, err := config.Load(cfgPath, home)
+	if err != nil {
+		return err
+	}
+	cfg.LastUsed = func(dir string) string { return lastused.Get(home, dir) }
+	stores, err := loadStores(home)
+	if err != nil {
+		return err
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if real, err := filepath.EvalSymlinks(self); err == nil {
+		self = real
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	a := &toolshim.Adder{
+		Home: home, Dir: cwd, Getenv: os.Getenv, Cfg: cfg, Stores: stores,
+		ShimsDir: filepath.Join(home, ".local", "share", "ai-profiles", "tool-shims"),
+		Self:     self, PathList: os.Getenv("PATH"),
+		CreateItem: createOpItem,
+		Get: func(reason string, refs map[string]string, account string) (map[string]string, error) {
+			c, err := client(p)
+			if err != nil {
+				return nil, err
+			}
+			return c.Get(reason, refs, account)
+		},
+		Out: os.Stdout,
+	}
+	return a.Add(o)
+}
+
+// createOpItem runs op item create with the template on stdin and returns
+// the item's id; op's output, which holds the values, is read, not printed.
+func createOpItem(account, vault string, item []byte) (string, error) {
+	args := []string{"item", "create", "--vault", vault, "--format", "json"}
+	if account != "" {
+		args = append(args, "--account", account)
+	}
+	cmd := exec.Command("op", args...)
+	cmd.Stdin = bytes.NewReader(item)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		first, _, _ := strings.Cut(strings.TrimSpace(stderr.String()), "\n")
+		return "", fmt.Errorf("op item create: %v: %s", err, first)
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(out, &created); err != nil || created.ID == "" {
+		return "", errors.New("op item create: no item id in its output")
+	}
+	return created.ID, nil
 }
 
 // loadStores reads the configuration; when its private file is missing (on a
