@@ -327,8 +327,10 @@ Every new or expired secret asks for its own approval, after a notification
 with the reason and the variables; an approved value stays in memory for the
 `ttl` and is reused without asking. No command prints a value, error messages
 name references, never values, and values reach only the environment of the
-command `ai-secrets run` launches. How it reaches each store is set in
-`~/.config/ai-secrets/config.toml`:
+command `ai-secrets run` launches. A failed 1Password read says why, from
+op's own message: approval not given in time, approval refused, vault, item
+or field not found, no account chosen among several. How it reaches each
+store is set in `~/.config/ai-secrets/config.toml`:
 
 ```toml
 ttl = "30m"

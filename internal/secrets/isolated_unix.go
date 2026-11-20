@@ -13,8 +13,6 @@ import (
 func ExecIsolated(extraEnv []string, name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
 	cmd.Env = append(os.Environ(), extraEnv...)
-	cmd.Stderr = os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	out, err := cmd.Output()
-	return string(out), err
+	return output(cmd)
 }

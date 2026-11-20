@@ -1,6 +1,7 @@
 package secrets
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -121,4 +122,51 @@ func (r *Resolver) opAccounts() []string {
 		return nil
 	}
 	return slices.Sorted(maps.Keys(r.Stores.OnePassword))
+}
+
+// opFailure turns a failed op read into the cause op gave on standard error:
+// approval not given, item or field not found, no account chosen, or op's
+// own message.
+func (r *Resolver) opFailure(ref string, err error) error {
+	msg := opMessage(err)
+	names := r.opAccounts()
+	switch {
+	case strings.Contains(msg, "multiple accounts found") || (msg == "" && len(names) > 1 && !HasOpAccount(ref)):
+		return fmt.Errorf("%s: no 1Password account for this reference (declared: %s): add ?account=<name>, or --account <name> to ai-secrets run", ref, strings.Join(names, ", "))
+	case strings.Contains(msg, "authorization timeout"):
+		return fmt.Errorf("%s: 1Password approval not given in time: approve the 1Password notification when it appears, then retry", ref)
+	case strings.Contains(msg, "authorization prompt dismissed"):
+		return fmt.Errorf("%s: 1Password approval refused (notification dismissed)", ref)
+	case strings.Contains(msg, "isn't an item") || strings.Contains(msg, "isn't a field") || strings.Contains(msg, "isn't a vault"):
+		return fmt.Errorf("%s: not found in 1Password: %s: check vault, item and field (and the account the reference uses)", ref, msg)
+	case msg != "":
+		return fmt.Errorf("%s: op read failed: %s", ref, msg)
+	}
+	return fmt.Errorf("%s: op read failed (1Password approved?): %w", ref, err)
+}
+
+// opMessage is op's last error line without its "[ERROR] date time" prefix
+// and the reference it repeats.
+func opMessage(err error) string {
+	var re *RunError
+	if !errors.As(err, &re) {
+		return ""
+	}
+	var last string
+	for _, l := range strings.Split(re.Stderr, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			last = l
+		}
+	}
+	if rest, ok := strings.CutPrefix(last, "[ERROR] "); ok {
+		if f := strings.SplitN(rest, " ", 3); len(f) == 3 {
+			last = f[2]
+		}
+	}
+	if rest, ok := strings.CutPrefix(last, "could not read secret '"); ok {
+		if _, after, ok := strings.Cut(rest, "': "); ok {
+			last = after
+		}
+	}
+	return last
 }
