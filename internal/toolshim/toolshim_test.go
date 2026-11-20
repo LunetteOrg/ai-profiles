@@ -363,3 +363,74 @@ env.SCW_SECRET_KEY = "op://V/Scaleway/secret key?account=personal"
 		t.Error("Lookup changed the configuration")
 	}
 }
+
+const scwFile = `active_profile: indagine
+access_key: SCWTOPAAAAAAAAAAAAAA
+secret_key: top-secret-value
+profiles:
+  indagine:
+    access_key: SCWINDAGINEAAAAAAAAA
+    secret_key: "indagine-secret-value"
+    # secret_key: old-secret-value
+    default_region: fr-par
+  altro:
+    access_key: SCWALTROAAAAAAAAAAAA
+    secret_key: altro-secret-value
+# secret_key: another-old-value
+`
+
+func TestScwFile(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	write(t, p, scwFile, 0o600)
+	if got, err := ScwActiveProfile(p); err != nil || got != "indagine" {
+		t.Errorf("active profile %q, %v", got, err)
+	}
+	v, err := ScwRead(p, "indagine")
+	if err != nil || v["access_key"] != "SCWINDAGINEAAAAAAAAA" || v["secret_key"] != "indagine-secret-value" {
+		t.Errorf("indagine read as %v, %v", v, err)
+	}
+	if v, _ := ScwRead(p, "default"); v["secret_key"] != "top-secret-value" {
+		t.Errorf("the top level is profile default: %v", v)
+	}
+	if got, _ := ScwCommentedSecrets(p); len(got) != 2 || got[0] != 8 || got[1] != 13 {
+		t.Errorf("commented secret_key lines = %v, want [8 13]", got)
+	}
+	if err := ScwRemoveSecret(p, "indagine"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(p)
+	s := string(b)
+	for _, gone := range []string{"indagine-secret-value", "old-secret-value", "another-old-value"} {
+		if strings.Contains(s, gone) {
+			t.Errorf("%s still in the file:\n%s", gone, s)
+		}
+	}
+	for _, kept := range []string{"SCWINDAGINEAAAAAAAAA", "default_region: fr-par", "altro-secret-value", "top-secret-value"} {
+		if !strings.Contains(s, kept) {
+			t.Errorf("%s removed:\n%s", kept, s)
+		}
+	}
+	if info, _ := os.Stat(p); info.Mode().Perm() != 0o600 {
+		t.Errorf("permissions changed to %v", info.Mode().Perm())
+	}
+	write(t, p, "access_key: x\n", 0o600)
+	if got, _ := ScwActiveProfile(p); got != "default" {
+		t.Errorf("without active_profile: %q, want default", got)
+	}
+}
+
+func TestLinkTarget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("links")
+	}
+	root := t.TempDir()
+	real := filepath.Join(root, "installs", "ai-profiles", "0.1.12", "ai-secrets")
+	write(t, real, "#!/bin/sh\n", 0o755)
+	if got := LinkTarget(real); got != real {
+		t.Errorf("without latest: %q", got)
+	}
+	os.Symlink("./0.1.12", filepath.Join(root, "installs", "ai-profiles", "latest"))
+	if got, want := LinkTarget(real), filepath.Join(root, "installs", "ai-profiles", "latest", "ai-secrets"); got != want {
+		t.Errorf("with mise's latest: %q, want %q", got, want)
+	}
+}

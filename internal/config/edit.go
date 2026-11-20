@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -350,4 +351,30 @@ func SetDefault(src []byte, profile string) ([]byte, bool, error) {
 		return joinLines(lines), true, nil
 	}
 	return nil, false, fmt.Errorf("default = … line not found before the tables: add it by hand")
+}
+
+// AddToolSection appends [profiles.<profile>.tools.<tool>] with the tool's
+// variables, reason and deny_args; a section already there is an error.
+func AddToolSection(src []byte, profile, tool string, t Tool) ([]byte, error) {
+	name := "profiles." + profile + ".tools." + tool
+	if _, _, ok := findTable(splitLines(src), name, false, nil); ok {
+		return nil, fmt.Errorf("[%s] is already there: edit it by hand", name)
+	}
+	var b strings.Builder
+	b.WriteString(strings.TrimRight(string(src), "\n"))
+	fmt.Fprintf(&b, "\n\n[%s]\n", name)
+	for _, k := range slices.Sorted(maps.Keys(t.Env)) {
+		fmt.Fprintf(&b, "env.%s = %s\n", k, strconv.Quote(t.Env[k]))
+	}
+	if t.Reason != "" {
+		fmt.Fprintf(&b, "reason = %s\n", strconv.Quote(t.Reason))
+	}
+	if len(t.DenyArgs) > 0 {
+		lists := make([]string, len(t.DenyArgs))
+		for i, d := range t.DenyArgs {
+			lists[i] = formatList(d)
+		}
+		fmt.Fprintf(&b, "deny_args = [%s]\n", strings.Join(lists, ", "))
+	}
+	return []byte(b.String()), nil
 }

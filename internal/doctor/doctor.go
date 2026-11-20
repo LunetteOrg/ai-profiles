@@ -530,12 +530,15 @@ func toolChecks(e Env, getenv func(string) string, tilde func(string) string) []
 			res = append(res, toolPathCheck(tool, profiles, e.PathList, tilde))
 		}
 		if check := toolConfigChecks[tool]; check != nil {
-			file, holders, err := check(e.Home, getenv)
-			switch {
-			case err != nil:
+			file, holders, commented, err := check(e.Home, getenv)
+			if err != nil {
 				add(Warn, "%s: %v", tilde(file), err)
-			case len(holders) > 0:
+			}
+			if len(holders) > 0 {
 				add(Warn, "%s still holds secret_key in profile %s: the %s shim supplies the secret, remove it from the file", tilde(file), strings.Join(holders, ", "), tool)
+			}
+			if len(commented) > 0 {
+				add(Warn, "%s has a commented-out secret_key at line %s: a key in clear all the same, remove it", tilde(file), joinInts(commented))
 			}
 		}
 	}
@@ -571,11 +574,15 @@ func toolPathCheck(tool, profiles, pathList string, tilde func(string) string) R
 
 // toolConfigChecks find, for a tool, its config file and the profiles in it
 // that still hold the secret, without reading the values.
-var toolConfigChecks = map[string]func(home string, getenv func(string) string) (string, []string, error){
-	"scw": func(home string, getenv func(string) string) (string, []string, error) {
+var toolConfigChecks = map[string]func(home string, getenv func(string) string) (file string, holders []string, commented []int, err error){
+	"scw": func(home string, getenv func(string) string) (string, []string, []int, error) {
 		p := toolshim.ScwConfigPath(home, getenv)
 		holders, err := toolshim.ScwSecretProfiles(p)
-		return p, holders, err
+		if err != nil {
+			return p, nil, nil, err
+		}
+		commented, err := toolshim.ScwCommentedSecrets(p)
+		return p, holders, commented, err
 	},
 }
 

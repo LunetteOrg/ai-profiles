@@ -245,3 +245,35 @@ func TestRemoveDirFromProfile(t *testing.T) {
 		t.Errorf("removing a missing dir changes nothing")
 	}
 }
+
+func TestAddToolSection(t *testing.T) {
+	src := []byte("default = \"p\"\n\n[profiles.p]\ndirs = [\"~/x\"]\n")
+	tool := Tool{
+		Env:      map[string]string{"SCW_SECRET_KEY": "op://V/id/secret key", "SCW_ACCESS_KEY": "op://V/id/access key?account=work"},
+		Reason:   "Scaleway CLI",
+		DenyArgs: [][]string{{"config", "info"}, {"config", "get", "secret-key"}},
+	}
+	out, err := AddToolSection(src, "p", "scw", tool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[profiles.p.tools.scw]
+env.SCW_ACCESS_KEY = "op://V/id/access key?account=work"
+env.SCW_SECRET_KEY = "op://V/id/secret key"
+reason = "Scaleway CLI"
+deny_args = [["config", "info"], ["config", "get", "secret-key"]]
+`
+	if !strings.HasSuffix(string(out), "\n\n"+want) || !strings.HasPrefix(string(out), string(src)) {
+		t.Errorf("got:\n%s", out)
+	}
+	cfg, err := Load(writeConfig(t, string(out)), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Profiles["p"].Tools["scw"]; got == nil || len(got.DenyArgs) != 2 || got.Env["SCW_SECRET_KEY"] != "op://V/id/secret key" {
+		t.Errorf("section read back as %+v", got)
+	}
+	if _, err := AddToolSection(out, "p", "scw", tool); err == nil {
+		t.Error("a second section for the same tool: expected an error")
+	}
+}
