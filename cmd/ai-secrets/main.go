@@ -32,9 +32,11 @@ import (
 
 const helpText = `ai-secrets: 1Password and Bitwarden secrets kept in memory for a while.
 
-  ai-secrets run [--reason <reason>] -- <command> [<arguments>]
+  ai-secrets run [--reason <reason>] [--account <name>] -- <command> [<arguments>]
                        replaces the op:// and bw://<account>/<item> references
-                       in the environment with their values and runs the command
+                       in the environment with their values and runs the command;
+                       --account is the 1Password account ([stores.1password.<name>])
+                       of op:// references without ?account=<name>
   ai-secrets status    secrets in memory and their expiry, without values
   ai-secrets lock      forgets every secret
   ai-secrets stop      stops the agent
@@ -246,14 +248,17 @@ func printRestore(w io.Writer, res private.Result) {
 }
 
 func runCommand(p secretagent.Paths, args []string) error {
-	const use = "usage: ai-secrets run [--reason <reason>] -- <command> [<arguments>]"
-	reason := ""
+	const use = "usage: ai-secrets run [--reason <reason>] [--account <1password account>] -- <command> [<arguments>]"
+	reason, account := "", ""
 	for len(args) > 0 && args[0] != "--" {
-		if args[0] == "--reason" && len(args) > 1 {
+		switch {
+		case args[0] == "--reason" && len(args) > 1:
 			reason, args = args[1], args[2:]
-			continue
+		case args[0] == "--account" && len(args) > 1:
+			account, args = args[1], args[2:]
+		default:
+			return errors.New(use)
 		}
-		return errors.New(use)
 	}
 	if len(args) < 2 {
 		return errors.New(use)
@@ -263,7 +268,7 @@ func runCommand(p secretagent.Paths, args []string) error {
 	for _, kv := range os.Environ() {
 		k, v, _ := strings.Cut(kv, "=")
 		if secrets.IsOp(v) || strings.HasPrefix(v, "bw://") {
-			refs[k] = v
+			refs[k] = secrets.WithOpAccount(v, account)
 		}
 	}
 	env := os.Environ()

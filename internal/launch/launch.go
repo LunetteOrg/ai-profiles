@@ -175,7 +175,7 @@ func (p *Plan) ResolveSecrets(src SecretSource, r *secrets.Resolver, cfg *config
 	for _, k := range slices.Sorted(maps.Keys(p.Secrets)) {
 		ref := p.Secrets[k]
 		if secrets.Tool(ref) != "" {
-			fromAgent[k] = ref
+			fromAgent[k] = secrets.WithOpAccount(ref, p.Profile.OnePassword)
 			continue
 		}
 		v, err := r.Resolve(ref)

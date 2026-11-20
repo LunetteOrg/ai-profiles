@@ -308,6 +308,17 @@ func TestResolveSecrets(t *testing.T) {
 	if p.Env["DA_ENV"] != "dall-ambiente" {
 		t.Errorf("env: is read directly: %v", p.Env)
 	}
+	if src.refs["KIMI_API_KEY"] != "op://Client-b/Kimi/credential" {
+		t.Errorf("without onepassword the reference is sent as written: %v", src.refs)
+	}
+	f.cfg.Profiles["client-b"].OnePassword = "work"
+	p, _ = f.plan("Developer/client-b", Request{Agent: "claude"})
+	if err := p.ResolveSecrets(src, r, f.cfg, f.home); err != nil {
+		t.Fatal(err)
+	}
+	if src.refs["KIMI_API_KEY"] != "op://Client-b/Kimi/credential?account=work" || src.refs["MISTRAL_API_KEY"] != "bw://Client-b Mistral" {
+		t.Errorf("op:// references take the profile's 1Password account: %v", src.refs)
+	}
 	if src.account != "client-b" || !strings.Contains(src.reason, "client-b") {
 		t.Errorf("the request carries the account and a reason: %+v", src)
 	}

@@ -342,3 +342,24 @@ func TestShimDenies(t *testing.T) {
 		t.Error("config get default-region should run with the secret")
 	}
 }
+
+func TestLookupOnePasswordAccount(t *testing.T) {
+	home := t.TempDir()
+	cfg := loadConfig(t, home, `default = "p"
+[profiles.p]
+onepassword = "work"
+[profiles.p.tools.scw]
+env.SCW_ACCESS_KEY = "op://V/Scaleway/access key"
+env.SCW_SECRET_KEY = "op://V/Scaleway/secret key?account=personal"
+`)
+	s, err := Lookup(cfg, home, "scw")
+	if err != nil || s == nil {
+		t.Fatalf("section %+v, error %v", s, err)
+	}
+	if s.Refs["SCW_ACCESS_KEY"] != "op://V/Scaleway/access key?account=work" || s.Refs["SCW_SECRET_KEY"] != "op://V/Scaleway/secret key?account=personal" {
+		t.Errorf("refs %v: the profile's account, unless the reference names one", s.Refs)
+	}
+	if cfg.Profiles["p"].Tools["scw"].Env["SCW_ACCESS_KEY"] != "op://V/Scaleway/access key" {
+		t.Error("Lookup changed the configuration")
+	}
+}

@@ -16,6 +16,7 @@ import (
 
 	"github.com/LunetteOrg/ai-profiles/internal/config"
 	"github.com/LunetteOrg/ai-profiles/internal/gitroot"
+	"github.com/LunetteOrg/ai-profiles/internal/secrets"
 )
 
 // Section is what the shim needs from a tool's section of a profile.
@@ -48,10 +49,14 @@ func Lookup(cfg *config.Config, dir, tool string) (*Section, error) {
 	if reason == "" {
 		reason = tool
 	}
+	refs := map[string]string{}
+	for k, v := range t.Env {
+		refs[k] = secrets.WithOpAccount(v, m.Profile.OnePassword)
+	}
 	return &Section{
 		Profile:  m.Profile.Name,
 		Reason:   fmt.Sprintf("%s (profile %s)", reason, m.Profile.Name),
-		Refs:     t.Env,
+		Refs:     refs,
 		Account:  m.Profile.Bitwarden,
 		DenyArgs: t.DenyArgs,
 	}, nil

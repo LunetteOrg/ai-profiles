@@ -137,7 +137,11 @@ func (r *Resolver) Resolve(ref string) (string, error) {
 		if r.Stores != nil && r.Stores.OpIsolated {
 			run = r.isolated()
 		}
-		out, err := run(nil, "op", "read", "--no-newline", ref)
+		out, err := r.opRead(run, ref)
+		var acc *accountError
+		if errors.As(err, &acc) {
+			return "", acc.error
+		}
 		if err != nil {
 			return "", fmt.Errorf("%s: op read failed (1Password approved?): %w", ref, err)
 		}
@@ -256,7 +260,7 @@ func (r *Resolver) unlock(b *Bitwarden) (string, error) {
 		}
 	}
 	login := r.isolated()
-	pw, err := login(nil, "op", "read", "--no-newline", b.Password)
+	pw, err := r.opRead(login, b.Password)
 	if err != nil || pw == "" {
 		return "", fmt.Errorf("Bitwarden %s master password from 1Password: %v", b.Name, err)
 	}

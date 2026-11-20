@@ -127,3 +127,18 @@ func TestClientAgentOverSocket(t *testing.T) {
 	}
 	var _ net.Listener = ln
 }
+
+func TestAgentKeepsAccountsApart(t *testing.T) {
+	var asked []string
+	a := &Agent{TTL: time.Hour, Now: time.Now, Resolve: func(ref, account string) (string, error) {
+		asked = append(asked, ref)
+		return "v-" + ref, nil
+	}}
+	resp := a.Handle(Request{Op: "get", Refs: map[string]string{
+		"A": "op://Shared/Item/f?account=personal",
+		"B": "op://Shared/Item/f?account=work",
+	}})
+	if resp.Error != "" || resp.Values["A"] == resp.Values["B"] || len(asked) != 2 {
+		t.Errorf("the same reference in two accounts is two secrets: %+v, asked %v", resp, asked)
+	}
+}

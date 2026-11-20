@@ -51,6 +51,10 @@ type Profile struct {
 	// Bitwarden names the account, configured in ai-secrets
 	// ([stores.bitwarden.<name>]), of bw:// references that name none.
 	Bitwarden string `toml:"bitwarden"`
+	// OnePassword names the account, configured in ai-secrets
+	// ([stores.1password.<name>]), of op:// references that name none
+	// (?account=<name>).
+	OnePassword string `toml:"onepassword"`
 	// Secrets maps environment variables to secret references, resolved at launch.
 	Secrets map[string]string `toml:"secrets"`
 	// Desktop gives the profile its own Claude Desktop (ai-profile desktop).
@@ -251,6 +255,9 @@ func load(path, home string, swap map[string]string) (*Config, error) {
 			p.Dirs[i] = Expand(d, home)
 		}
 		for k, v := range p.Secrets {
+			if err := checkOpAccount(v); err != nil {
+				return nil, fmt.Errorf("%s: profile %s: secrets.%s: %w", path, name, k, err)
+			}
 			if !envName.MatchString(k) {
 				return nil, fmt.Errorf("%s: profile %s: %q is not a valid variable name", path, name, k)
 			}
@@ -288,6 +295,9 @@ func load(path, home string, swap map[string]string) (*Config, error) {
 			return nil, fmt.Errorf("%s: server %s: needs command or url, not both", path, name)
 		}
 		for k, v := range s.Env {
+			if err := checkOpAccount(v); err != nil {
+				return nil, fmt.Errorf("%s: server %s: env.%s: %w", path, name, k, err)
+			}
 			// A server has no profile to take a Bitwarden account from: the
 			// reference names it.
 			if secrets.Tool(v) == "bw" && !strings.Contains(strings.TrimPrefix(v, "bw://"), "/") {
@@ -327,6 +337,9 @@ func checkTool(name string, t *Tool, bitwarden string) error {
 			if !secrets.IsRef(v) {
 				return fmt.Errorf("env.%s is an empty reference", k)
 			}
+			if err := checkOpAccount(v); err != nil {
+				return fmt.Errorf("env.%s: %w", k, err)
+			}
 		default:
 			return fmt.Errorf("env.%s must be an op:// or bw:// reference, not the value", k)
 		}
@@ -343,6 +356,17 @@ func checkTool(name string, t *Tool, bitwarden string) error {
 				return fmt.Errorf("deny_args %q: arguments are subcommands, neither empty nor flags", prefix)
 			}
 		}
+	}
+	return nil
+}
+
+// checkOpAccount rejects an op:// reference with an empty ?account=.
+func checkOpAccount(ref string) error {
+	if !secrets.IsOp(ref) || !secrets.HasOpAccount(ref) {
+		return nil
+	}
+	if acc, _ := secrets.SplitOpRef(ref); acc == "" {
+		return errors.New("?account= names no 1Password account")
 	}
 	return nil
 }
