@@ -10,7 +10,9 @@ import (
 )
 
 // Start launches "bin agent" detached from the caller, which may be an MCP
-// server about to exec another program.
+// server about to exec another program. The agent works in its own folder:
+// it outlives the caller, whose folder (often a worktree) may be removed,
+// and the programs it runs (bw among them) fail in a folder that is gone.
 func Start(bin string, p Paths) error {
 	if err := os.MkdirAll(filepath.Dir(p.Socket), 0o700); err != nil {
 		return err
@@ -22,6 +24,7 @@ func Start(bin string, p Paths) error {
 	defer log.Close()
 	cmd := exec.Command(bin, "agent")
 	cmd.Stdout, cmd.Stderr = log, log
+	cmd.Dir = filepath.Dir(p.Socket)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return err
