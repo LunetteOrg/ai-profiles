@@ -50,6 +50,8 @@ type storesFile struct {
 			Password      string `toml:"password"`
 			LockAfterRead *bool  `toml:"lock_after_read"`
 			DataDir       string `toml:"data_dir"`
+			Email         string `toml:"email"`
+			OTP           string `toml:"otp"`
 		} `toml:"bitwarden"`
 	} `toml:"stores"`
 	Private *private.Settings `toml:"private"`
@@ -103,6 +105,8 @@ func LoadStores(home string) (*Stores, error) {
 			Password:      b.Password,
 			LockAfterRead: b.LockAfterRead == nil || *b.LockAfterRead,
 			DataDir:       b.DataDir,
+			Email:         b.Email,
+			OTP:           b.OTP,
 		}
 		if acc.Unlock == "" {
 			acc.Unlock = "password"
@@ -120,6 +124,9 @@ func LoadStores(home string) (*Stores, error) {
 		case "biometric":
 		default:
 			return nil, fmt.Errorf("%s: stores.bitwarden.%s: unlock = %q: use \"password\" or \"biometric\"", path, name, acc.Unlock)
+		}
+		if acc.OTP != "" && !IsOp(acc.OTP) {
+			return nil, fmt.Errorf("%s: stores.bitwarden.%s: otp must be an op:// reference to the one-time password in 1Password (?attribute=otp)", path, name)
 		}
 		s.Bitwarden[name] = acc
 	}

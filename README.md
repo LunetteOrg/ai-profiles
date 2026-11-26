@@ -349,6 +349,8 @@ server = "https://vault.bitwarden.eu"
 unlock = "password"               # or "biometric", when the bw CLI has it
 password = "op://Private/Bitwarden/password"
 lock_after_read = true
+email = "me@client-a.example"     # for ai-secrets bitwarden login
+otp = "op://Private/Bitwarden/one-time password?attribute=otp"   # optional
 ```
 
 - **1Password, `read = "isolated"`**: every `op read` runs in a process session
@@ -369,8 +371,14 @@ lock_after_read = true
   values are read, then `bw lock`. With `false` the account stays unlocked for
   the `ttl`, with the session key only in the agent's memory.
 - **Bitwarden accounts** have their CLI data folder in
-  `~/.config/ai-secrets/bitwarden/<account>`; the login is done once with
-  `BITWARDENCLI_APPDATA_DIR=… bw login`.
+  `~/.config/ai-secrets/bitwarden/<account>`. `ai-secrets bitwarden login
+  <account>` logs the CLI in there: logout, the server, then `bw login` with
+  the `email` and the master password from 1Password, and leaves the account
+  locked. The login is needed once, and again when an unlock fails although
+  the password is right (the CLI's data no longer match the server's). With
+  `otp`, the two-step code comes from 1Password too and reaches `bw` on its
+  standard input (`bw` reads it only from its prompt or its command line);
+  without it, `bw` asks for the code on the terminal.
 
 ### Several Claude accounts in one profile
 

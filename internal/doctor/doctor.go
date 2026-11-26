@@ -434,7 +434,7 @@ func Run(e Env) []Result {
 					continue
 				}
 				if st, err := status(b); err != nil || st == "unauthenticated" {
-					add(area, Fail, "Bitwarden %s not logged in: BITWARDENCLI_APPDATA_DIR=%s bw login", b.Name, tilde(b.DataDir))
+					add(area, Fail, "Bitwarden %s not logged in: ai-secrets bitwarden login %s", b.Name, b.Name)
 					problems++
 				}
 			}

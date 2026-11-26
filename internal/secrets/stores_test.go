@@ -32,6 +32,8 @@ read = "shared"
 [stores.bitwarden.client-e]
 server = "https://vault.bitwarden.eu"
 password = "op://Private/x/password"
+email = "me@client-e.example"
+otp = "op://Private/x/one-time password?attribute=otp"
 [stores.bitwarden.aperto]
 password = "op://Private/y/password"
 lock_after_read = false
@@ -47,6 +49,9 @@ lock_after_read = false
 	if w == nil || w.Unlock != "password" || !w.LockAfterRead || w.DataDir != filepath.Join(home, ".config", "ai-secrets", "bitwarden", "client-e") || w.Name != "client-e" {
 		t.Errorf("client-e = %+v", w)
 	}
+	if w.Email != "me@client-e.example" || w.OTP != "op://Private/x/one-time password?attribute=otp" {
+		t.Errorf("email and otp: %+v", w)
+	}
 	if s.Bitwarden["aperto"].LockAfterRead {
 		t.Errorf("lock_after_read = false is kept")
 	}
@@ -57,6 +62,7 @@ lock_after_read = false
 		"password non op":    "[stores.bitwarden.x]\npassword = \"segreta\"\n",
 		"password mancante":  "[stores.bitwarden.x]\nserver = \"https://x\"\n",
 		"ttl non valido":     "ttl = \"presto\"\n",
+		"otp non op":         "[stores.bitwarden.x]\npassword = \"op://a/b/c\"\notp = \"123456\"\n",
 	} {
 		os.WriteFile(p, []byte(body), 0o600)
 		if _, err := LoadStores(home); err == nil {
