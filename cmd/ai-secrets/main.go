@@ -46,6 +46,10 @@ const helpText = `ai-secrets: 1Password and Bitwarden secrets kept in memory for
                        moves the tool's key from its config file to a new
                        1Password item, writes the tool's section in the profile
                        and links its tool shim (tools: scw)
+  ai-secrets bitwarden login <account>
+                       logs the account's bw CLI in again ([stores.bitwarden.<account>]):
+                       logout, server, login with the master password and, with
+                       otp, the two-step code from 1Password; leaves it locked
   ai-secrets status    secrets in memory and their expiry, without values
   ai-secrets lock      forgets every secret
   ai-secrets stop      stops the agent
@@ -204,6 +208,20 @@ func run(args []string) error {
 			return errors.New(toolAddUsage)
 		}
 		return runToolAdd(home, p, args[2:])
+	case "bitwarden":
+		if len(args) != 3 || args[1] != "login" {
+			return errors.New(bitwardenLoginUsage)
+		}
+		stores, err := loadStores(home)
+		if err != nil {
+			return err
+		}
+		r := &secrets.Resolver{Home: home, Getenv: os.Getenv, Run: secrets.Exec, RunIsolated: secrets.ExecIsolated, Stores: stores}
+		if err := r.Login(args[2]); err != nil {
+			return err
+		}
+		fmt.Printf("Bitwarden %s: logged in, locked\n", args[2])
+		return nil
 	case "status":
 		resp, err := (&secretagent.Client{Socket: p.Socket}).Do(secretagent.Request{Op: "status"})
 		if err != nil {
@@ -228,6 +246,8 @@ func run(args []string) error {
 	}
 	return fmt.Errorf("unknown command %q (ai-secrets help)", args[0])
 }
+
+const bitwardenLoginUsage = "usage: ai-secrets bitwarden login <account>"
 
 const toolAddUsage = "usage: ai-secrets tool add <tool> --vault <vault> [--item <title>] [--profile <profile>] [--account <1password account>] [--from <tool profile>]"
 

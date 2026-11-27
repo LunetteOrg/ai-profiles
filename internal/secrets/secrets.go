@@ -91,6 +91,8 @@ type Bitwarden struct {
 	Unlock        string // "password" (master password from 1Password) or "biometric"
 	Password      string // op://…, for Unlock "password"
 	LockAfterRead bool   // bw lock after every read: never left unlocked
+	Email         string // the account's email, for ai-secrets bitwarden login
+	OTP           string // op://…?attribute=otp, the two-step code for the login
 }
 
 // Env is what the bw CLI needs to work on this account.
@@ -108,6 +110,9 @@ type Resolver struct {
 	// Stores says how to reach each password manager; nil reads op:// with
 	// Run and knows no Bitwarden account.
 	Stores *Stores
+	// RunLogin runs bw login with input on its standard input; nil uses
+	// ExecLogin.
+	RunLogin LoginRunner
 	// Account is the Bitwarden account of bw:// references that name none.
 	Account string
 	Now     func() time.Time
@@ -291,7 +296,7 @@ func (r *Resolver) unlock(b *Bitwarden) (string, error) {
 	pw = ""
 	key := strings.TrimSpace(out)
 	if err != nil || key == "" {
-		return "", fmt.Errorf("unlocking Bitwarden %s failed (logged in? BITWARDENCLI_APPDATA_DIR=%s bw login): %v", b.Name, b.DataDir, err)
+		return "", fmt.Errorf("unlocking Bitwarden %s failed (logged in, with current data? ai-secrets bitwarden login %s): %v", b.Name, b.Name, err)
 	}
 	if r.keeps(b) {
 		if r.sessions == nil {

@@ -295,7 +295,7 @@ secrets.MISTRAL_API_KEY = "bw://Mistral"
 	status := "unauthenticated"
 	env := Env{Home: home, Cfg: cfg, Self: "/nessuno", PathList: bin,
 		BitwardenStatus: func(*secrets.Bitwarden) (string, error) { return status, nil }}
-	if res := Run(env); !find(res, Fail, "bw login") {
+	if res := Run(env); !find(res, Fail, "ai-secrets bitwarden login") {
 		t.Errorf("a Bitwarden account without login should fail:\n%s", dump(res))
 	}
 	status = "locked"
